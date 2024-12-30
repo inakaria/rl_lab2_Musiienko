@@ -86,6 +86,7 @@ def train_dqn(env_name, episodes, epochs, gamma, epsilon, epsilon_decay, lr, mem
                      memory_size=memory_size, batch_size=batch_size, target_update_freq=target_update_freq)
 
     rewards_history = []
+    q_values_history = []
     loss_history = []
 
     for epoch in range(epochs):
@@ -110,23 +111,41 @@ def train_dqn(env_name, episodes, epochs, gamma, epsilon, epsilon_decay, lr, mem
 
             epoch_rewards.append(total_reward)
 
+        # Валідація
+        val_state, _ = env.reset()
+        val_done = False
+        val_q_values = []
+        while not val_done:
+            with torch.no_grad():
+                q_values = agent.q_network(torch.FloatTensor(val_state).unsqueeze(0))
+                val_q_values.append(q_values.max().item())
+            val_state, _, val_done, _, _ = env.step(np.random.choice(action_dim))
+
+        agent.update_target_network()
         agent.decay_epsilon()
 
+        q_values_history.append(np.mean(val_q_values))
         rewards_history.append(np.mean(epoch_rewards))
         loss_history.append(np.mean(epoch_losses) if epoch_losses else 0)
 
-        print(f"Epoch {epoch + 1}/{epochs}, Avg Reward: {np.mean(epoch_rewards):.2f}, Max Loss: {loss_history[-1]:.4f}")
+        print(f"Epoch {epoch + 1}/{epochs}, Avg Reward: {np.mean(epoch_rewards):.2f}, Avg Q: {np.mean(val_q_values):.2f}, Max Loss: {loss_history[-1]:.4f}")
 
     # Графіки
     plt.figure(figsize=(15, 5))
 
-    plt.subplot(1, 2, 1)
+    plt.subplot(1, 3, 1)
     plt.plot(rewards_history)
     plt.title('Average Reward per Epoch')
     plt.xlabel('Epoch')
     plt.ylabel('Avg Reward')
 
-    plt.subplot(1, 2, 2)
+    plt.subplot(1, 3, 2)
+    plt.plot(q_values_history)
+    plt.title('Average Q(s, a) per Epoch')
+    plt.xlabel('Epoch')
+    plt.ylabel('Avg Q(s, a)')
+
+    plt.subplot(1, 3, 3)
     plt.plot(loss_history)
     plt.title('Max Loss per Epoch')
     plt.xlabel('Epoch')
@@ -137,6 +156,81 @@ def train_dqn(env_name, episodes, epochs, gamma, epsilon, epsilon_decay, lr, mem
 
     return agent
 
+episodes = 150
+epochs = 100
+memory_size = 10 * episodes * epochs
 
-agent = train_dqn(env_name="CartPole-v1", episodes=50, epochs=50, gamma=0.99, epsilon=1.0, 
-                  epsilon_decay=0.995, lr=0.001, memory_size=25000, batch_size=16, target_update_freq=50)
+agent = train_dqn(env_name="CartPole-v1", episodes=episodes, epochs=epochs, gamma=0.99, epsilon=1.0, 
+                  epsilon_decay=0.995, lr=0.001, memory_size=memory_size, batch_size=16, target_update_freq=100)
+
+# Тестування
+def test_dqn(env_name, agent, test_episodes):
+    env = gym.make(env_name)
+    episode_rewards = []
+    episode_lengths = []
+    detailed_metrics = {}
+
+    for episode in range(test_episodes):
+        state, _ = env.reset()
+        total_reward = 0
+        step_count = 0
+        q_values = []
+        rewards_per_step = []
+
+        done = False
+        while not done:
+            state_tensor = torch.FloatTensor(state).unsqueeze(0)
+            with torch.no_grad():
+                q_value = agent.q_network(state_tensor).cpu().numpy()
+            q_values.append(q_value)
+
+            action = np.argmax(q_value)
+            next_state, reward, done, _, _ = env.step(action)
+
+            total_reward += reward
+            rewards_per_step.append(reward)
+            state = next_state
+            step_count += 1
+
+        episode_rewards.append(total_reward)
+        episode_lengths.append(step_count)
+        detailed_metrics[episode + 1] = {
+            "q_values": q_values,
+            "rewards_per_step": rewards_per_step,
+        }
+
+    env.close()
+    return episode_rewards, episode_lengths, detailed_metrics
+
+
+rewards_er, lengths_er, test_detailed_metrics = test_dqn(env_name="CartPole-v1", agent=agent, test_episodes=100)
+
+random_episode = random.randint(1, 99)
+selected_episodes = [1, random_episode, 99]
+
+for episode in selected_episodes:
+    q_values_steps = np.array(test_detailed_metrics[episode]["q_values"]).squeeze()
+    rewards_steps = test_detailed_metrics[episode]["rewards_per_step"]
+
+    # Графік Q(s, a)
+    plt.figure(figsize=(12, 6))
+    plt.subplot(2, 1, 1)
+    for action_idx in range(q_values_steps.shape[1]):
+        plt.plot(q_values_steps[:, action_idx], label=f"Q(s, a={action_idx})")
+    plt.xlabel("Step")
+    plt.ylabel("Q(s, a)")
+    plt.title(f"Q-Values during Episode {episode}")
+    plt.legend()
+    plt.grid()
+
+    # Графік винагороди
+    plt.subplot(2, 1, 2)
+    plt.plot(rewards_steps, label="Reward per Step")
+    plt.xlabel("Step")
+    plt.ylabel("Reward")
+    plt.title(f"Rewards per Step during Episode {episode}")
+    plt.legend()
+    plt.grid()
+
+    plt.tight_layout()
+    plt.savefig(f"2_DQN_FT_ER during Episode {episode}")

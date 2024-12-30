@@ -26,7 +26,7 @@ class DQNAgent:
         self.loss_fn = nn.MSELoss()
 
         self.memory = []
-        self.batch_size = 64
+        self.batch_size = 16
 
     def select_action(self, state):
         if np.random.rand() < self.epsilon:
@@ -161,11 +161,11 @@ def train_dqn(env_name, episodes, epochs, gamma, epsilon, epsilon_decay, lr):
     return agent
 
 
-agent = train_dqn(env_name="CartPole-v1", episodes=50, epochs=50, gamma=0.99, epsilon=1.0, epsilon_decay=0.995, lr=0.1)
+agent = train_dqn(env_name="CartPole-v1", episodes=150, epochs=100, gamma=0.99, epsilon=1.0, epsilon_decay=0.995, lr=0.001)
 
 
 # Тренування
-def test_dqn(env_name, agent, test_episodes=100):
+def test_dqn(env_name, agent, test_episodes):
     env = gym.make(env_name)
     episode_rewards = []
     episode_lengths = []
@@ -204,11 +204,11 @@ def test_dqn(env_name, agent, test_episodes=100):
     return episode_rewards, episode_lengths, detailed_metrics
 
 
-test_rewards, test_lengths, test_detailed_metrics = test_dqn(env_name="CartPole-v1", agent=agent, test_episodes=50)
+test_rewards, test_lengths, test_detailed_metrics = test_dqn(env_name="CartPole-v1", agent=agent, test_episodes=100)
 
 
-random_episode = random.randint(1, 100)
-selected_episodes = [1, random_episode, 100]
+random_episode = random.randint(1, 99)
+selected_episodes = [1, random_episode, 99]
 
 for episode in selected_episodes:
     q_values_steps = np.array(test_detailed_metrics[episode]["q_values"]).squeeze()
@@ -216,6 +216,7 @@ for episode in selected_episodes:
 
     # Графік Q(s, a)
     plt.figure(figsize=(12, 6))
+    plt.subplot(2, 1, 1)
     for action_idx in range(q_values_steps.shape[1]):
         plt.plot(q_values_steps[:, action_idx], label=f"Q(s, a={action_idx})")
     plt.xlabel("Step")
@@ -223,14 +224,15 @@ for episode in selected_episodes:
     plt.title(f"Q-Values during Episode {episode}")
     plt.legend()
     plt.grid()
-    plt.savefig(f"2_DQN Q-Values during Episode {episode}")
 
     # Графік винагороди
-    plt.figure(figsize=(12, 6))
+    plt.subplot(2, 1, 2)
     plt.plot(rewards_steps, label="Reward per Step")
     plt.xlabel("Step")
     plt.ylabel("Reward")
     plt.title(f"Rewards per Step during Episode {episode}")
     plt.legend()
     plt.grid()
-    plt.savefig(f"2_DQN Q-Values during Episode {episode}")
+
+    plt.tight_layout()
+    plt.savefig(f"2_DQN during Episode {episode}")
