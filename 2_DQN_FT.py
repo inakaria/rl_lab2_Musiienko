@@ -102,6 +102,7 @@ def train_dqn_ft(env_name, episodes, epochs, gamma, epsilon, epsilon_decay, lr, 
     for epoch in range(epochs):
         epoch_rewards = []
         epoch_losses = []
+        q_values_epoch = []
 
         for episode in range(episodes):
             state, _ = env.reset()
@@ -112,35 +113,45 @@ def train_dqn_ft(env_name, episodes, epochs, gamma, epsilon, epsilon_decay, lr, 
                 action = agent.select_action(state)
                 next_state, reward, done, _, _ = env.step(action)
                 agent.store_transition((state, action, reward, next_state, done))
-                loss = agent.train()
+                agent.train()
 
-                if loss is not None:
-                    epoch_losses.append(loss)
+                with torch.no_grad():
+                    q_values = agent.q_network(torch.FloatTensor(state).unsqueeze(0))
+                    q_values_epoch.append(q_values.max().item())
 
                 state = next_state
                 total_reward += reward
 
             epoch_rewards.append(total_reward)
 
-        rewards_history.append(np.mean(epoch_rewards))
-        loss_history.append(np.mean(epoch_losses))
+            if len(agent.memory) >= 16:
+                batch = random.sample(agent.memory, 16)
+                states, actions, rewards, next_states, dones = zip(*batch)
 
-        # Валідація
-        val_state, _ = env.reset()
-        val_done = False
-        val_q_values = []
-        while not val_done:
-            with torch.no_grad():
-                q_values = agent.q_network(torch.FloatTensor(val_state).unsqueeze(0))
-                val_q_values.append(q_values.max().item())
-            val_state, _, val_done, _, _ = env.step(np.random.choice(action_dim))
+                # Перетворюємо на тензори
+                states = torch.FloatTensor(states)
+                actions = torch.LongTensor(actions).unsqueeze(1)
+                rewards = torch.FloatTensor(rewards).unsqueeze(1)
+                next_states = torch.FloatTensor(next_states)
+                dones = torch.FloatTensor(dones).unsqueeze(1)
+
+                # Обчислення Q-значень
+                q_values = agent.q_network(states).gather(1, actions)
+                with torch.no_grad():
+                    next_q_values = agent.target_network(next_states).max(1, keepdim=True)[0]
+                    target_q_values = rewards + agent.gamma * next_q_values * (1 - dones)
+                
+                epoch_losses.append((q_values - target_q_values).abs().max().item())
+
+
+        rewards_history.append(np.mean(epoch_rewards))
+        q_values_history.append(np.mean(q_values_epoch))
+        loss_history.append(np.mean(epoch_losses))
 
         agent.update_target_network()
         agent.decay_epsilon()
 
-        q_values_history.append(np.mean(val_q_values))
-
-        print(f"Epoch {epoch + 1}/{epochs}, Avg Reward: {np.mean(epoch_rewards):.2f}, Avg Q: {np.mean(val_q_values):.2f}, Max Loss: {loss_history[-1]:.4f}")
+        print(f"Epoch {epoch + 1}/{epochs}, Avg Reward: {np.mean(epoch_rewards):.2f}, Avg Q: {np.mean(q_values_epoch):.2f}, Max Loss: {np.mean(epoch_losses):.4f}")
 
     # Графіки
     plt.figure(figsize=(15, 5))
